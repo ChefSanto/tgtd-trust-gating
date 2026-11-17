@@ -1,0 +1,39 @@
+STACK COMPATIBILITY NOTES (a2h2_trustgate_package/patches/)
+=============================================================
+
+ENVIRONMENT (canonical, used for ALL 100/120-epoch numbers)
+  Python 3.10 (miniforge env "oldpy"), torch 2.1.2+cu118,
+  transformers 4.30.2, tokenizers 0.13.3, sentencepiece 0.1.99,
+  protobuf < 4, numpy < 2. GPU: RTX 3090.
+
+The repository code is transformers-4.2x-era. Under this stack the
+PRISTINE zip runs unmodified. Two adjustments were used during the
+extension runs:
+
+1) Non-finite-loss skip-guard in src/train_async.py (insurance only;
+   fired ZERO times across all 12 runs). Adds, right before
+   `loss.backward()` in train_model():
+       if not torch.isfinite(loss):
+           nonfinite_skips += 1
+           ...print...
+           continue
+   and `nonfinite_skips = 0` after the train_model def. See
+   apply_skip_guard.py in this folder.
+
+2) Under NEWER stacks (torch >= 2.4 / transformers >= 4.31, e.g. the
+   stock py3.12 env with torch 2.14 + transformers 5.20), the pristine
+   code DOES NOT run as-is. Documented failures, in order:
+   - PoolerAnswerClass/PoolerEndLogits/PoolerStartLogits removed from
+     transformers.modeling_utils (stub them or import from an older
+     transformers);
+   - SequenceSummary removed (provide the classic implementation as a
+     fallback class);
+   - new from_pretrained finalize step expects tied-weights metadata
+     (add mark_tied_weights_as_initialized no-op + all_tied_weights_keys
+     property returning {} to XLNetForSequenceClassification);
+   - F.cosine_similarity ignores the eps clamp under new torch ->
+     0/0 NaN for zero-norm corrupted samples inside the detector
+     (replace with an explicitly clamped manual cosine).
+   None of the 100/120-epoch numbers came from the new stack. Do not
+   attempt to reproduce with transformers >= 4.31 without porting all
+   of the above.
